@@ -21,6 +21,7 @@ UI. Grafana logs in through **Keycloak SSO** (OIDC).
 Scrape (pull) dotted; data write/read solid; access via Traefik; SSO in purple.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','lineColor':'#8090a6','primaryBorderColor':'#3a557f'}}}%%
 flowchart TB
     user(["You / browser"])
     traefik["Traefik Ingress<br/>*.127.0.0.1.nip.io :8080"]
@@ -51,6 +52,13 @@ flowchart TB
     traefik -->|"keycloak host"| keycloak
     %% SSO
     grafana -.->|"OIDC token + userinfo (svc)"| keycloak
+
+    classDef idp stroke:#8b5cf6,stroke-width:2px;
+    classDef store stroke:#1a7f37,stroke-width:2px;
+    classDef edge stroke:#8090a6,stroke-width:1.5px;
+    class keycloak idp;
+    class vmstorage store;
+    class user,traefik edge;
 
     linkStyle 0,1,2 stroke:#e08a00,stroke-dasharray:4 3
     linkStyle 3,4,5,6 stroke:#1a7f37,stroke-width:2px
@@ -170,6 +178,7 @@ can write or read any tenant. **vmauth** is the enforcement layer: each credenti
 a fixed account, and the client cannot override it.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','lineColor':'#8090a6','primaryBorderColor':'#3a557f'}}}%%
 flowchart LR
     wa(["team-a writer"]) -->|"team-a-write<br/>/api/v1/write"| va["vmauth"]
     wb(["team-b writer"]) -->|"team-b-write"| va
@@ -181,6 +190,12 @@ flowchart LR
       t1
       t2
     end
+    classDef proxy stroke:#0ea5e9,stroke-width:2px;
+    classDef acct stroke:#1a7f37,stroke-width:2px;
+    classDef cli stroke:#8090a6,stroke-width:1.5px;
+    class va proxy;
+    class t1,t2 acct;
+    class wa,wb,ga,gb cli;
     linkStyle 4,5 stroke:#1a7f37,stroke-width:2px
 ```
 
