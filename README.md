@@ -133,8 +133,9 @@ Then open (nip.io hostnames resolve to 127.0.0.1 — no `/etc/hosts` edits):
 | Keycloak admin | http://keycloak.127.0.0.1.nip.io:8080 (`admin` / `admin`) |
 | vmauth (tenant write/read) | http://vmauth.127.0.0.1.nip.io:8080 (basic auth per tenant — see §3c) |
 
-Grafana's **VictoriaMetrics** datasource is pre-wired to vmselect, and the **VictoriaMetrics -
-cluster** dashboard is provisioned automatically (Dashboards → VictoriaMetrics folder).
+Grafana's **VictoriaMetrics** datasource is pre-wired to vmselect, and the official VM dashboards
+are provisioned automatically into the **VictoriaMetrics** folder: **cluster**, **vmagent**, and
+**vmauth** (pinned to the v1.151.0 tag). All read tenant 0, which vmagent populates.
 
 ## 3a. Keycloak SSO
 Grafana uses Keycloak via OIDC (`[auth.generic_oauth]`). The realm, an OIDC `grafana` client,
@@ -232,12 +233,13 @@ password → **401**.
 
 ## 4. Real metrics (vmagent)
 `deploy.sh` installs **vmagent** (`values-vmagent.yaml`), which scrapes the VM cluster
-components' own `/metrics` (vminsert/vmselect/vmstorage, one `job` each) and remote-writes to
-vminsert — this is what populates the **VictoriaMetrics - cluster** dashboard. Verify:
+components (vminsert/vmselect/vmstorage, one `job` each), **vmauth**, and itself, then
+remote-writes to vminsert (tenant 0) — this is what populates the cluster, vmagent, and vmauth
+dashboards. Verify:
 ```bash
 kubectl --context k3d-vmtest -n vm-test run q --image=curlimages/curl --rm -it -- \
   curl -s 'http://vmcluster-victoria-metrics-cluster-vmselect:8481/select/0/prometheus/api/v1/query?query=count%20by%20(job)%20(vm_app_version)'
-# expect vminsert/vmselect/vmstorage/vmagent
+# expect vminsert/vmselect/vmstorage/vmagent/vmauth
 ```
 To scrape more (nodes, cadvisor, annotated pods), extend `config.scrape_configs` in
 `values-vmagent.yaml`.

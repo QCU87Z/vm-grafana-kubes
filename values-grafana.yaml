@@ -104,6 +104,12 @@ dashboards:
     vm-cluster:
       url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.151.0/dashboards/victoriametrics-cluster.json
       datasource: VictoriaMetrics
+    vm-agent:
+      url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.151.0/dashboards/vmagent.json
+      datasource: VictoriaMetrics
+    vm-auth:
+      url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.151.0/dashboards/vmauth.json
+      datasource: VictoriaMetrics
 
 # Reach Grafana through Traefik at a stable host (single Traefik port-forward serves all UIs).
 ingress:

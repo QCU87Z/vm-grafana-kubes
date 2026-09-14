@@ -51,3 +51,21 @@ config:
           target_label: instance
         - source_labels: [__meta_kubernetes_namespace]
           target_label: namespace
+
+    # vmauth (tenant proxy) — so the vmauth dashboard has data. job = vmauth.
+    - job_name: vmauth
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names: [vm-test]
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          regex: victoria-metrics-auth
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_container_port_name]
+          regex: http
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: instance
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
