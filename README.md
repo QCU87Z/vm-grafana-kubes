@@ -10,7 +10,7 @@ Pinned chart versions (validated with `helm template`):
 - `vm/victoria-metrics-cluster` **0.50.0** (app v1.151.0)
 - `vm/victoria-metrics-agent` **0.47.0** (app v1.151.0)
 - `vm/victoria-metrics-auth` **0.41.0** (app v1.151.0)
-- `grafana/grafana` **10.5.15** (app 12.3.1)
+- `grafana-community/grafana` **13.2.4** (Grafana 13.2.1)
 - `codecentric/keycloakx` **7.3.1** (Keycloak 26.7.3)
 
 Access is via **Traefik Ingress** + `*.127.0.0.1.nip.io` hostnames (nip.io resolves to
@@ -252,7 +252,7 @@ Deploy the **base files only** (drop the `-ocp-sim` overlays — the SCC assigns
 ```bash
 helm install vmcluster vm/victoria-metrics-cluster -f values-vmcluster.yaml -n vm-test
 helm install keycloak  codecentric/keycloakx       -f values-keycloak.yaml  -n vm-test
-helm install grafana   grafana/grafana             -f values-grafana.yaml   -n vm-test
+helm install grafana   grafana-community/grafana   -f values-grafana.yaml   -n vm-test
 ```
 Then adapt for prod:
 - Replace Ingress with **Routes** for Grafana / vmui / Keycloak; update the OIDC `auth_url`

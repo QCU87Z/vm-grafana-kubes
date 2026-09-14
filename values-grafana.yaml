@@ -1,5 +1,7 @@
-# grafana values — chart 10.5.15 (appVersion 12.3.1)
+# grafana values — chart grafana-community/grafana 13.2.4 (appVersion 13.2.1)
 # Target: OpenShift Local (CRC), namespace vm-test. Also portable to OpenShift prod.
+# (grafana-community is the community continuation of the Grafana Helm chart; its chart
+#  version tracks the Grafana release, so 13.2.4 == Grafana 13.2.1 — no image override needed.)
 #
 # OpenShift / restricted-v2 fixes (the chart's defaults FAIL on OpenShift):
 #   1. Default pod securityContext hardcodes runAsUser/runAsGroup/fsGroup: 472
