@@ -1,0 +1,75 @@
+# grafana values — chart 10.5.15 (appVersion 12.3.1)
+# Target: OpenShift Local (CRC), namespace vm-test. Also portable to OpenShift prod.
+#
+# OpenShift / restricted-v2 fixes (the chart's defaults FAIL on OpenShift):
+#   1. Default pod securityContext hardcodes runAsUser/runAsGroup/fsGroup: 472
+#      -> restricted-v2 rejects it. Set to {} so the SCC assigns a valid UID/GID/fsGroup.
+#   2. initChownData is a ROOT (runAsUser: 0, CHOWN cap) init container -> forbidden.
+#      Disable it; the Grafana image already supports running as an arbitrary UID.
+
+# Fix #1: let OpenShift assign the UID/GID/fsGroup.
+# NOTE: `securityContext: {}` does NOT work — Helm merges maps, so the chart's
+# default fsGroup/runAsUser:472 survives. The fields must be nulled explicitly.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: null
+  runAsGroup: null
+  fsGroup: null
+
+# Fix #2: drop the root chown init container
+initChownData:
+  enabled: false
+
+persistence:
+  enabled: true
+  type: pvc
+  size: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  # storageClassName: ""   # empty = default SC (crc-csi-hostpath-provisioner on CRC)
+
+service:
+  type: ClusterIP
+  port: 80
+
+adminUser: admin
+# Leave adminPassword unset to let the chart generate one; retrieve it with:
+#   oc get secret grafana -n vm-test -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+# Point Grafana at the VictoriaMetrics cluster query endpoint (vmselect, Prometheus API).
+# URL assumes release name 'vmcluster' in the same namespace (vm-test).
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: VictoriaMetrics
+        type: prometheus
+        access: proxy
+        url: http://vmcluster-victoria-metrics-cluster-vmselect:8481/select/0/prometheus
+        isDefault: true
+        jsonData:
+          timeInterval: 15s
+
+# Provision the official VictoriaMetrics cluster dashboard into a "VictoriaMetrics" folder.
+# Pinned to the v1.151.0 tag (== appVersion). The chart's download-dashboards init container
+# fetches the JSON at startup, so the pod needs egress to raw.githubusercontent.com at deploy
+# time. For an air-gapped OpenShift, replace `url:` with an inline `json:` block (or a
+# sidecar-loaded ConfigMap) instead — the datasource binding stays the same.
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: victoriametrics
+        orgId: 1
+        folder: VictoriaMetrics
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/victoriametrics
+
+dashboards:
+  victoriametrics:
+    vm-cluster:
+      url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.151.0/dashboards/victoriametrics-cluster.json
+      datasource: VictoriaMetrics

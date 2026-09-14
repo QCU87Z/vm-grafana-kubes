@@ -1,0 +1,21 @@
+# OVERLAY — k3d only. Layer AFTER values-vmagent.yaml:
+#   helm ... -f values-vmagent.yaml -f values-vmagent-ocp-sim.yaml
+# Simulates OpenShift restricted-v2 by forcing an arbitrary high UID (see the other
+# -ocp-sim overlays). Do NOT use on real OpenShift — the SCC assigns these there.
+
+podSecurityContext:
+  enabled: true
+  runAsNonRoot: true
+  runAsUser: 1000700000
+  runAsGroup: 0
+  fsGroup: 1000700000
+
+securityContext:
+  enabled: true
+  runAsNonRoot: true
+  runAsUser: 1000700000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault

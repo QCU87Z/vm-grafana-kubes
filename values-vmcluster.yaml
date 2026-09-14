@@ -1,0 +1,52 @@
+# victoria-metrics-cluster values — chart 0.50.0 (appVersion v1.151.0)
+# Target: OpenShift Local (CRC), namespace vm-test. Also portable to OpenShift prod.
+#
+# OpenShift / restricted-v2 note:
+#   This chart renders EMPTY securityContext ({}) by default — it does NOT hardcode
+#   runAsUser/fsGroup — so OpenShift's SCC admission injects a valid UID/fsGroup from
+#   the namespace range. No securityContext override is needed here. Leave the
+#   per-component securityContext.enabled / podSecurityContext.enabled at their
+#   chart defaults.
+
+# ---- vmselect: query layer ----
+vmselect:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---- vminsert: ingest layer ----
+vminsert:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---- vmstorage: storage layer (StatefulSet + PVC) ----
+vmstorage:
+  replicaCount: 2
+  # Retention for the test bed. Bump for prod.
+  retentionPeriod: "1"          # 1 month
+  persistentVolume:
+    enabled: true
+    size: 8Gi
+    # Empty = use the cluster's DEFAULT StorageClass.
+    # On CRC that is 'crc-csi-hostpath-provisioner'. For prod, set the prod class explicitly.
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi

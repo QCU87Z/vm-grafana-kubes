@@ -1,0 +1,17 @@
+# OVERLAY — k3d only. Layer AFTER values-grafana.yaml:
+#   helm ... -f values-grafana.yaml -f values-grafana-ocp-sim.yaml
+#
+# Purpose: simulate OpenShift restricted-v2 on plain Kubernetes. The base file nulls
+# the UID/fsGroup so OpenShift can assign them — but on k3d nothing assigns them, and
+# Grafana (arbitrary UID) then can't write to its root-owned PVC. This overlay forces a
+# high arbitrary UID + gid 0 + an fsGroup so the kubelet chowns the volume, faithfully
+# reproducing how Grafana runs under OpenShift. Do NOT use this on real OpenShift.
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000700000     # arbitrary high UID, like OpenShift's assigned range
+  runAsGroup: 0             # OpenShift runs with gid 0 supplementary
+  fsGroup: 1000700000       # kubelet chowns the PVC so the arbitrary UID can write
+
+# initChownData stays disabled (inherited from base) — root init container is what
+# OpenShift forbids, and we're proving Grafana works without it.

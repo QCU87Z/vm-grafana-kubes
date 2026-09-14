@@ -1,0 +1,57 @@
+# OVERLAY — k3d only. Layer AFTER values-vmcluster.yaml:
+#   helm ... -f values-vmcluster.yaml -f values-vmcluster-ocp-sim.yaml
+#
+# Purpose: plain Kubernetes has no mutating SCC, so nothing injects an arbitrary UID
+# or fsGroup the way OpenShift's restricted-v2 does. This overlay simulates that by
+# forcing a high, arbitrary UID (like OpenShift's per-namespace range) and an fsGroup
+# so vmstorage can write to its PVC. Do NOT use this on real OpenShift — there the SCC
+# assigns these for you and you deploy with the base file only.
+
+vmstorage:
+  podSecurityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000700000
+    runAsGroup: 0
+    fsGroup: 1000700000
+  securityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000700000
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+
+vmselect:
+  podSecurityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000700000
+    runAsGroup: 0
+  securityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000700000
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+
+vminsert:
+  podSecurityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000700000
+    runAsGroup: 0
+  securityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000700000
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault

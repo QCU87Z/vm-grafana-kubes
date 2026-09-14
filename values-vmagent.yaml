@@ -1,0 +1,53 @@
+# victoria-metrics-agent values — chart 0.47.0 (appVersion v1.151.0)
+# Scrapes the VM cluster components' own /metrics and remote-writes to vminsert,
+# so the "VictoriaMetrics - cluster" Grafana dashboard shows real data.
+# Base file = OpenShift-target (empty securityContext -> SCC assigns UID/fsGroup).
+# For k3d, layer values-vmagent-ocp-sim.yaml on top.
+
+# vmagent needs to discover pods -> RBAC (ClusterRole) + ServiceAccount.
+rbac:
+  create: true
+serviceAccount:
+  create: true
+
+# Send scraped samples to the cluster's ingest endpoint.
+remoteWrite:
+  - url: http://vmcluster-victoria-metrics-cluster-vminsert:8480/insert/0/prometheus
+
+# No local buffer PVC needed for a test bed (emptyDir is fine).
+persistence:
+  enabled: false
+
+config:
+  global:
+    scrape_interval: 15s
+  scrape_configs:
+    # vmagent's own metrics
+    - job_name: vmagent
+      static_configs:
+        - targets: ["localhost:8429"]
+
+    # VM cluster components (vminsert / vmselect / vmstorage), discovered by pod role.
+    # job is set to the component so the dashboard's per-component panels line up.
+    - job_name: victoria-metrics-cluster
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names: [vm-test]
+      relabel_configs:
+        # keep only VM cluster pods
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          regex: victoria-metrics-cluster
+          action: keep
+        # scrape ONLY the http/metrics port (vmstorage also exposes 8400/8401 — not HTTP)
+        - source_labels: [__meta_kubernetes_pod_container_port_name]
+          regex: http
+          action: keep
+        # job = vminsert | vmselect | vmstorage
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+          target_label: job
+        # tidy instance / namespace labels
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: instance
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
