@@ -1,0 +1,61 @@
+# keycloakx values — chart 7.3.1 (Keycloak 26.7.3, quay.io/keycloak/keycloak).
+# Dev-mode single-node IdP for the test bed. Base file = OpenShift-target
+# (securityContext nulled so the SCC assigns UID/fsGroup); for k3d layer
+# values-keycloak-ocp-sim.yaml on top.
+
+# Run in dev mode with in-memory H2 (no external DB) and import the realm at startup.
+command:
+  - "/opt/keycloak/bin/kc.sh"
+args:
+  - "start-dev"
+  - "--import-realm"
+
+database:
+  vendor: dev-mem          # in-memory H2 — no PVC, state resets on restart (fine for a test bed)
+
+http:
+  relativePath: "/"        # serve at root: http://keycloak.../realms/...
+
+extraEnv: |
+  - name: KC_BOOTSTRAP_ADMIN_USERNAME
+    value: admin
+  - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+    value: admin
+  # Fixed external URL so browser-facing links carry the :8080 ingress port.
+  - name: KC_HOSTNAME
+    value: http://keycloak.127.0.0.1.nip.io:8080
+  - name: KC_HOSTNAME_STRICT
+    value: "false"
+  # Let Grafana's backend reach the token/userinfo endpoints via the in-cluster Service.
+  - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+    value: "true"
+  # KC_PROXY_HEADERS / KC_HTTP_ENABLED / KC_HEALTH_ENABLED are already set by the chart.
+
+# Mount the realm export so --import-realm picks it up.
+extraVolumes: |
+  - name: realm
+    configMap:
+      name: keycloak-realm
+extraVolumeMounts: |
+  - name: realm
+    mountPath: /opt/keycloak/data/import
+    readOnly: true
+
+# OpenShift-clean security context (chart default runAsUser:1000 would fail restricted-v2).
+# NOTE: nulled explicitly — `{}` won't clear it (Helm merges maps).
+podSecurityContext:
+  fsGroup: null
+securityContext:
+  runAsUser: null
+  runAsNonRoot: true
+
+# Browser reaches Keycloak through Traefik at this host (via the single Traefik port-forward).
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  servicePort: http
+  rules:
+    - host: keycloak.127.0.0.1.nip.io
+      paths:
+        - path: /
+          pathType: Prefix

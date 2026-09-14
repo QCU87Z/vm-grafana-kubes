@@ -17,6 +17,7 @@ kubectl config use-context "k3d-$CLUSTER" >/dev/null
 echo ">> Helm repos"
 helm repo add vm https://victoriametrics.github.io/helm-charts/ >/dev/null
 helm repo add grafana https://grafana.github.io/helm-charts >/dev/null
+helm repo add codecentric https://codecentric.github.io/helm-charts >/dev/null
 helm repo update >/dev/null
 
 echo ">> Namespace $NS"
@@ -28,7 +29,26 @@ helm upgrade --install vmcluster vm/victoria-metrics-cluster \
   -f "$HERE/values-vmcluster.yaml" -f "$HERE/values-vmcluster-ocp-sim.yaml" \
   --wait --timeout 5m
 
-echo ">> Grafana (base + OCP-sim overlay)"
+echo ">> vmauth (tenant-enforcing auth proxy) + ingress"
+helm upgrade --install vmauth vm/victoria-metrics-auth \
+  --version 0.41.0 -n "$NS" \
+  -f "$HERE/values-vmauth.yaml" -f "$HERE/values-vmauth-ocp-sim.yaml" \
+  --wait --timeout 3m
+kubectl apply -f "$HERE/ingress-vmauth.yaml"
+
+echo ">> Keycloak realm ConfigMap + Keycloak (SSO / IdP)"
+kubectl create configmap keycloak-realm -n "$NS" \
+  --from-file=observability-realm.json="$HERE/keycloak-realm.json" \
+  --dry-run=client -o yaml | kubectl apply -f -
+helm upgrade --install keycloak codecentric/keycloakx \
+  --version 7.3.1 -n "$NS" \
+  -f "$HERE/values-keycloak.yaml" -f "$HERE/values-keycloak-ocp-sim.yaml" \
+  --wait --timeout 5m
+
+echo ">> vmui Ingress"
+kubectl apply -f "$HERE/ingress-vmui.yaml"
+
+echo ">> Grafana (base + OCP-sim overlay, with Keycloak SSO)"
 helm upgrade --install grafana grafana/grafana \
   --version 10.5.15 -n "$NS" \
   -f "$HERE/values-grafana.yaml" -f "$HERE/values-grafana-ocp-sim.yaml" \
@@ -43,6 +63,17 @@ helm upgrade --install vmagent vm/victoria-metrics-agent \
 echo ">> Pods:"
 kubectl get pods -n "$NS"
 echo
-echo ">> Grafana admin password:"
+echo ">> Grafana local admin password (fallback login):"
 kubectl get secret grafana -n "$NS" -o jsonpath="{.data.admin-password}" | base64 -d ; echo
-echo ">> Port-forward:  kubectl port-forward svc/grafana 3000:80 -n $NS"
+echo
+echo ">> ONE port-forward serves all UIs via Traefik + *.127.0.0.1.nip.io :"
+echo "     kubectl port-forward -n kube-system svc/traefik 8080:80"
+echo "   then open:"
+echo "     Grafana   http://grafana.127.0.0.1.nip.io:8080     (Sign in with Keycloak)"
+echo "     vmui      http://vmui.127.0.0.1.nip.io:8080/select/0/vmui/"
+echo "     Keycloak  http://keycloak.127.0.0.1.nip.io:8080    (admin / admin)"
+echo "     vmauth    http://vmauth.127.0.0.1.nip.io:8080      (tenant write/read entrypoint)"
+echo "   SSO test user: ashley / changeme"
+echo "   Tenants: team-a (acct 1) / team-b (acct 2). Grafana datasources: 'VM - team-a', 'VM - team-b'."
+echo "   Write example: curl -u team-a-write:team-a-write-pass --data-binary 'm 1' \\"
+echo "                    http://vmauth.127.0.0.1.nip.io:8080/api/v1/import/prometheus"

@@ -1,0 +1,20 @@
+# OVERLAY — k3d only. Layer AFTER values-keycloak.yaml:
+#   helm ... -f values-keycloak.yaml -f values-keycloak-ocp-sim.yaml
+# Simulates OpenShift restricted-v2 by forcing an arbitrary high UID. The quay.io
+# Keycloak image is OpenShift-compatible (runs as an arbitrary UID with gid 0).
+# Do NOT use on real OpenShift — the SCC assigns these there.
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000700000
+  runAsGroup: 0
+  fsGroup: 1000700000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000700000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault

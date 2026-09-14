@@ -1,0 +1,22 @@
+# Ingress for vmauth — the tenant-authenticated entry point for writes/reads.
+# External writers push with their tenant creds, e.g.:
+#   curl -u team-a-write:team-a-write-pass --data-binary @- \
+#     http://vmauth.127.0.0.1.nip.io:8080/api/v1/import/prometheus
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vmauth
+  namespace: vm-test
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: vmauth.127.0.0.1.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vmauth-victoria-metrics-auth
+                port:
+                  number: 8427

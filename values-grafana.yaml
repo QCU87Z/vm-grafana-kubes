@@ -38,15 +38,44 @@ adminUser: admin
 
 # Point Grafana at the VictoriaMetrics cluster query endpoint (vmselect, Prometheus API).
 # URL assumes release name 'vmcluster' in the same namespace (vm-test).
+# Datasource passwords (tenant read creds) live in secureJsonData below. This is a test bed,
+# so we allow them inline; for prod source them from a Secret and drop this flag.
+assertNoLeakedSecrets: false
+
 datasources:
   datasources.yaml:
     apiVersion: 1
     datasources:
+      # Infra / self-monitoring — tenant 0, direct to vmselect (feeds the cluster dashboard).
       - name: VictoriaMetrics
         type: prometheus
         access: proxy
         url: http://vmcluster-victoria-metrics-cluster-vmselect:8481/select/0/prometheus
         isDefault: true
+        jsonData:
+          timeInterval: 15s
+      # Tenant team-a (account 1) — reads go through vmauth with the read-only cred.
+      - name: VM - team-a
+        uid: vm-team-a
+        type: prometheus
+        access: proxy
+        url: http://vmauth-victoria-metrics-auth:8427
+        basicAuth: true
+        basicAuthUser: team-a-read
+        secureJsonData:
+          basicAuthPassword: team-a-read-pass
+        jsonData:
+          timeInterval: 15s
+      # Tenant team-b (account 2).
+      - name: VM - team-b
+        uid: vm-team-b
+        type: prometheus
+        access: proxy
+        url: http://vmauth-victoria-metrics-auth:8427
+        basicAuth: true
+        basicAuthUser: team-b-read
+        secureJsonData:
+          basicAuthPassword: team-b-read-pass
         jsonData:
           timeInterval: 15s
 
@@ -73,3 +102,36 @@ dashboards:
     vm-cluster:
       url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.151.0/dashboards/victoriametrics-cluster.json
       datasource: VictoriaMetrics
+
+# Reach Grafana through Traefik at a stable host (single Traefik port-forward serves all UIs).
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  hosts:
+    - grafana.127.0.0.1.nip.io
+  path: /
+
+# Keycloak SSO (OIDC) via Grafana's generic OAuth.
+# Split URLs on purpose: the browser hits Keycloak through the ingress host (:8080),
+# while Grafana's backend calls token/userinfo over the in-cluster Service — the same
+# browser-external / backend-internal split you get with OpenShift Routes.
+# NOTE: the client secret is a DEV secret from keycloak-realm.json — not for prod.
+# Passed via env (Grafana maps GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET) because the chart
+# refuses a plaintext client_secret inside grafana.ini. For prod, source it from a k8s Secret.
+env:
+  GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: grafana-dev-secret
+
+grafana.ini:
+  server:
+    root_url: http://grafana.127.0.0.1.nip.io:8080/
+  auth.generic_oauth:
+    enabled: true
+    name: Keycloak
+    allow_sign_up: true
+    client_id: grafana
+    scopes: openid email profile roles
+    auth_url: http://keycloak.127.0.0.1.nip.io:8080/realms/observability/protocol/openid-connect/auth
+    token_url: http://keycloak-keycloakx-http.vm-test.svc:80/realms/observability/protocol/openid-connect/token
+    api_url: http://keycloak-keycloakx-http.vm-test.svc:80/realms/observability/protocol/openid-connect/userinfo
+    role_attribute_path: contains(roles[*], 'grafana-admin') && 'GrafanaAdmin' || contains(roles[*], 'grafana-editor') && 'Editor' || 'Viewer'
+    role_attribute_strict: false

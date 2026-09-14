@@ -1,0 +1,43 @@
+# victoria-metrics-auth (vmauth) — chart 0.41.0 (app v1.151.0)
+# Tenant-enforcing auth proxy in front of the VM cluster. vminsert/vmselect do NOT
+# authenticate and the tenant is just a URL path (/insert/<id>/, /select/<id>/), so vmauth
+# is what stops a tenant writing/reading another tenant's data: each credential is pinned to
+# a fixed account path, and the client cannot override it.
+#
+# Tenants:  team-a = account 1   |   team-b = account 2
+# Separate write and read creds per tenant:
+#   *-write  -> ONLY /api/v1/write, routed to insert/<id>  (cannot read, cannot pick a tenant)
+#   *-read   -> ONLY query paths,   routed to select/<id>  (cannot write)
+# A request that matches no url_map entry is rejected — so a write cred has no route to reads
+# or to another tenant, and vice-versa.
+#
+# NOTE: plaintext dev passwords. For prod use bcrypt hashes / an existingSecret, and front
+# vmauth with a NetworkPolicy so tenants can't reach vminsert/vmselect directly (see README).
+
+config:
+  users:
+    # ---- team-a (account 1) ----
+    - username: team-a-write
+      password: team-a-write-pass
+      url_map:
+        - src_paths: ["/api/v1/write", "/prometheus/api/v1/write", "/api/v1/import.*", "/prometheus/api/v1/import.*"]
+          url_prefix: "http://vmcluster-victoria-metrics-cluster-vminsert:8480/insert/1/prometheus"
+    - username: team-a-read
+      password: team-a-read-pass
+      url_map:
+        - src_paths: ["/api/v1/.*", "/prometheus/.*", "/select/.*"]
+          url_prefix: "http://vmcluster-victoria-metrics-cluster-vmselect:8481/select/1/prometheus"
+
+    # ---- team-b (account 2) ----
+    - username: team-b-write
+      password: team-b-write-pass
+      url_map:
+        - src_paths: ["/api/v1/write", "/prometheus/api/v1/write", "/api/v1/import.*", "/prometheus/api/v1/import.*"]
+          url_prefix: "http://vmcluster-victoria-metrics-cluster-vminsert:8480/insert/2/prometheus"
+    - username: team-b-read
+      password: team-b-read-pass
+      url_map:
+        - src_paths: ["/api/v1/.*", "/prometheus/.*", "/select/.*"]
+          url_prefix: "http://vmcluster-victoria-metrics-cluster-vmselect:8481/select/2/prometheus"
+
+# Base = OpenShift-clean: securityContext.enabled:true renders empty -> SCC assigns UID/fsGroup.

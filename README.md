@@ -8,16 +8,25 @@ Kubernetes allows.
 
 Pinned chart versions (validated with `helm template`):
 - `vm/victoria-metrics-cluster` **0.50.0** (app v1.151.0)
+- `vm/victoria-metrics-agent` **0.47.0** (app v1.151.0)
+- `vm/victoria-metrics-auth` **0.41.0** (app v1.151.0)
 - `grafana/grafana` **10.5.15** (app 12.3.1)
+- `codecentric/keycloakx` **7.3.1** (Keycloak 26.7.3)
+
+Access is via **Traefik Ingress** + `*.127.0.0.1.nip.io` hostnames (nip.io resolves to
+127.0.0.1, so no `/etc/hosts` edits). A single `kubectl port-forward` to Traefik serves every
+UI. Grafana logs in through **Keycloak SSO** (OIDC).
 
 ## Architecture & data flow
-Scrape (pull) paths dotted; data write/read (push/query) paths solid.
+Scrape (pull) dotted; data write/read solid; access via Traefik; SSO in purple.
 
 ```mermaid
 flowchart TB
     user(["You / browser"])
+    traefik["Traefik Ingress<br/>*.127.0.0.1.nip.io :8080"]
 
     subgraph vmtest["namespace: vm-test"]
+        keycloak["Keycloak<br/>realm: observability"]
         vmagent["vmagent<br/>:8429"]
         vminsert["vminsert ×2<br/>:8480 http"]
         vmstorage["vmstorage ×2<br/>:8482 http · :8400 insert · :8401 select"]
@@ -25,42 +34,36 @@ flowchart TB
         grafana["Grafana<br/>:3000"]
     end
 
-    subgraph kdash["namespace: kubernetes-dashboard"]
-        kong["kong-proxy<br/>:443"]
-        k8sdash["dashboard api / web / metrics-scraper"]
-    end
-
-    api["kube-apiserver"]
-
-    %% scrape (pull) — vmagent GETs /metrics from each component
+    %% scrape (pull)
     vmagent -.->|"GET /metrics"| vminsert
     vmagent -.->|"GET /metrics"| vmselect
     vmagent -.->|"GET /metrics"| vmstorage
-
-    %% write path
-    vmagent ==>|"remote_write<br/>/insert/0/prometheus :8480"| vminsert
+    %% write
+    vmagent ==>|"remote_write :8480"| vminsert
     vminsert ==>|"store, sharded :8400"| vmstorage
-
-    %% read path
+    %% read
     vmselect ==>|"fetch series :8401"| vmstorage
-    grafana ==>|"PromQL<br/>/select/0/prometheus :8481"| vmselect
-
-    %% user access (kubectl port-forward)
-    user -->|"pf 3000→80"| grafana
-    user -->|"pf 8481 (vmui)"| vmselect
-    user -->|"pf 8443→443"| kong
-    kong --> k8sdash
-    k8sdash -->|"list/watch pods, deploys, sts, pvcs…"| api
+    grafana ==>|"PromQL :8481"| vmselect
+    %% access via ingress
+    user -->|"http :8080"| traefik
+    traefik -->|"grafana host"| grafana
+    traefik -->|"vmui host"| vmselect
+    traefik -->|"keycloak host"| keycloak
+    %% SSO
+    grafana -.->|"OIDC token + userinfo (svc)"| keycloak
 
     linkStyle 0,1,2 stroke:#e08a00,stroke-dasharray:4 3
-    linkStyle 3,4,5 stroke:#1a7f37,stroke-width:2px
+    linkStyle 3,4,5,6 stroke:#1a7f37,stroke-width:2px
+    linkStyle 7,8,9,10 stroke:#8090a6
+    linkStyle 11 stroke:#8b5cf6,stroke-dasharray:5 3,stroke-width:2px
 ```
 
-- **Scrape (dotted)** — vmagent pulls `/metrics` from vminsert (8480), vmselect (8481), vmstorage (8482) and itself (8429); origin of the dashboard's data.
-- **Write (green)** — vmagent `remote_write`s to vminsert:8480, which shards to vmstorage over the internal insert port 8400.
-- **Read (green)** — Grafana PromQL → vmselect:8481, which fans out to every vmstorage over the select port 8401, merges, returns.
+- **Scrape (dotted amber)** — vmagent pulls `/metrics` from vminsert/vmselect/vmstorage (and itself); origin of the dashboard's data.
+- **Write (green)** — vmagent `remote_write`s to vminsert:8480, sharded to vmstorage over the internal insert port 8400.
+- **Read (green)** — Grafana PromQL → vmselect:8481, which fans out to vmstorage over the select port 8401.
+- **Access (grey)** — one Traefik port-forward routes by Host to Grafana, vmui, and Keycloak.
+- **SSO (purple)** — the browser authenticates at Keycloak *through the ingress host*; Grafana's backend exchanges the code and reads userinfo over the in-cluster Service. That browser-external / backend-internal split is exactly the OpenShift Route model.
 - **vmstorage splits insert (8400) and select (8401)** ports — why vminsert/vmselect scale independently.
-- **Kubernetes Dashboard** talks to the kube-apiserver (live objects), not to VictoriaMetrics. On OpenShift this is replaced by the built-in web console.
 
 ## What k3d CAN and CANNOT prove
 CAN (functional + OpenShift-shaped):
@@ -81,9 +84,13 @@ CANNOT (needs real OpenShift eventually):
 | `values-vmcluster.yaml` | base — real OpenShift deliverable |
 | `values-grafana.yaml` | base — real OpenShift deliverable (nulls UID, disables root init container; provisions the VM cluster dashboard) |
 | `values-vmagent.yaml` | base — vmagent scrapes the VM cluster components, remote-writes to vminsert |
-| `values-vmcluster-ocp-sim.yaml` / `values-vmagent-ocp-sim.yaml` | **k3d only** overlays — force arbitrary UID + fsGroup |
-| `values-grafana-ocp-sim.yaml` | **k3d only** overlay — forces arbitrary UID + fsGroup |
-| `deploy.sh` | creates k3d cluster + installs both (base + sim) |
+| `values-grafana.yaml` also carries the **ingress** + **Keycloak SSO** (generic OAuth) config |
+| `values-keycloak.yaml` | base — Keycloak (dev-mode, H2), realm import, ingress |
+| `keycloak-realm.json` | realm `observability`: `grafana` OIDC client + roles + test user (imported at startup) |
+| `values-vmauth.yaml` | base — vmauth tenant proxy: per-tenant write-only / read-only creds pinned to an account |
+| `ingress-vmui.yaml` / `ingress-vmauth.yaml` | Ingress for vmui and for the vmauth tenant entrypoint |
+| `values-*-ocp-sim.yaml` (vmcluster / vmagent / grafana / keycloak / vmauth) | **k3d only** overlays — force arbitrary UID + fsGroup |
+| `deploy.sh` | creates k3d cluster + installs the whole stack (base + sim) |
 | `dashboard-k8s.sh` | installs the Kubernetes Dashboard (live object viewer) + prints a login token |
 
 ## 0. Prerequisites
@@ -105,18 +112,44 @@ kubectl get pvc  -n vm-test          # vmstorage + grafana PVCs Bound
 kubectl logs -n vm-test deploy/grafana | grep -i "permission denied"   # expect NOTHING
 ```
 
-## 3. Access (port-forward)
+## 3. Access — one port-forward, all UIs (Traefik Ingress)
 ```bash
-kubectl port-forward svc/grafana 3000:80 -n vm-test        # http://localhost:3000
-kubectl get secret grafana -n vm-test -o jsonpath="{.data.admin-password}" | base64 -d ; echo
-
-# VictoriaMetrics UI (vmui) via vmselect
-kubectl port-forward svc/vmcluster-victoria-metrics-cluster-vmselect 8481 -n vm-test
-# then open http://localhost:8481/select/0/vmui/
+kubectl port-forward -n kube-system svc/traefik 8080:80
 ```
-Grafana's **VictoriaMetrics** datasource is pre-wired to vmselect — run a query in Explore.
-The **VictoriaMetrics → VictoriaMetrics - cluster** dashboard is provisioned automatically
-(Dashboards → VictoriaMetrics folder).
+Then open (nip.io hostnames resolve to 127.0.0.1 — no `/etc/hosts` edits):
+
+| UI | URL |
+|---|---|
+| Grafana | http://grafana.127.0.0.1.nip.io:8080 — **Sign in with Keycloak** |
+| vmui | http://vmui.127.0.0.1.nip.io:8080/select/0/vmui/ |
+| Keycloak admin | http://keycloak.127.0.0.1.nip.io:8080 (`admin` / `admin`) |
+| vmauth (tenant write/read) | http://vmauth.127.0.0.1.nip.io:8080 (basic auth per tenant — see §3c) |
+
+Grafana's **VictoriaMetrics** datasource is pre-wired to vmselect, and the **VictoriaMetrics -
+cluster** dashboard is provisioned automatically (Dashboards → VictoriaMetrics folder).
+
+## 3a. Keycloak SSO
+Grafana uses Keycloak via OIDC (`[auth.generic_oauth]`). The realm, an OIDC `grafana` client,
+roles, and a test user are imported from `keycloak-realm.json` at startup.
+
+- **Test user:** `ashley` / `changeme` — has realm role `grafana-admin` → mapped to Grafana **GrafanaAdmin**.
+- **Local fallback login:** the Grafana admin (`admin` / password below) still works at the same page.
+```bash
+kubectl get secret grafana -n vm-test -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+```
+- **Role mapping** (`role_attribute_path` in `values-grafana.yaml`): realm roles land in the
+  `roles` userinfo claim → `grafana-admin`→GrafanaAdmin, `grafana-editor`→Editor, else Viewer.
+
+**Why the URLs are split** (`values-grafana.yaml`): the browser hits Keycloak's `auth_url`
+through the ingress host (`keycloak.127.0.0.1.nip.io:8080`), while Grafana's backend calls
+`token_url`/`api_url` over the in-cluster Service (`keycloak-keycloakx-http.vm-test.svc`).
+`KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` lets Keycloak keep a fixed browser-facing issuer while
+still answering backchannel calls on the Service name — the same external-vs-internal split
+you get with OpenShift Routes.
+
+> Dev shortcuts (not for prod): Keycloak runs `start-dev` with in-memory H2 (state resets on
+> restart) and the client secret is a literal in `keycloak-realm.json`. For prod use `start`
+> with a real DB and source the secret from a Secret.
 
 ## 3b. Kubernetes Dashboard (live pods / StatefulSets / Deployments)
 ```bash
@@ -129,6 +162,58 @@ Regenerate a token later:
 
 (On OpenShift you would use the **built-in OpenShift web console** for this instead — no
 separate dashboard needed.)
+
+## 3c. Multi-tenancy (vmauth)
+VictoriaMetrics separates data by **account ID** carried in the URL path (`/insert/<id>/…`,
+`/select/<id>/…`). But **vminsert/vmselect do not authenticate** — anyone who can reach them
+can write or read any tenant. **vmauth** is the enforcement layer: each credential is pinned to
+a fixed account, and the client cannot override it.
+
+```mermaid
+flowchart LR
+    wa(["team-a writer"]) -->|"team-a-write<br/>/api/v1/write"| va["vmauth"]
+    wb(["team-b writer"]) -->|"team-b-write"| va
+    ga(["Grafana: VM - team-a"]) -->|"team-a-read"| va
+    gb(["Grafana: VM - team-b"]) -->|"team-b-read"| va
+    va ==>|"insert/1 · select/1"| t1["account 1<br/>(team-a)"]
+    va ==>|"insert/2 · select/2"| t2["account 2<br/>(team-b)"]
+    subgraph vmc["VM cluster (vminsert / vmstorage / vmselect)"]
+      t1
+      t2
+    end
+    linkStyle 4,5 stroke:#1a7f37,stroke-width:2px
+```
+
+**Tenants:** team-a = account 1, team-b = account 2. Each has **separate write and read creds**:
+
+| Credential | Can do | Routed to | Cannot |
+|---|---|---|---|
+| `team-a-write` / `team-a-write-pass` | write (`/api/v1/write`, `/api/v1/import*`) | `insert/1` | read, or target account 2 |
+| `team-a-read` / `team-a-read-pass` | query | `select/1` | write |
+| `team-b-write` / `team-b-write-pass` | write | `insert/2` | read, or target account 1 |
+| `team-b-read` / `team-b-read-pass` | query | `select/2` | write |
+
+The account is fixed in `values-vmauth.yaml` (`url_prefix`), so a writer has **no way to name a
+tenant** — the tenant isn't in the path it sends. A request matching no `url_map` entry is
+rejected, so a write cred can't read and a read cred can't write.
+
+**Grafana** exposes each tenant as its own datasource — **VM - team-a** and **VM - team-b** —
+each using that tenant's read cred through vmauth, so a dashboard only ever sees its tenant's data.
+
+Write to a tenant:
+```bash
+kubectl port-forward -n kube-system svc/traefik 8080:80   # if not already running
+curl -u team-a-write:team-a-write-pass --data-binary 'demo_app_requests{svc="api"} 111' \
+  http://vmauth.127.0.0.1.nip.io:8080/api/v1/import/prometheus
+```
+
+Verified end to end: team-a-read returns only account 1's series, team-b-read only account 2's;
+`team-a-write` attempting a read → **400**, `team-a-read` attempting a write → **400**, wrong
+password → **401**.
+
+> Hardening for prod (noted, not done here): add a **NetworkPolicy** so only vmauth can reach
+> vminsert/vmselect (otherwise a pod could bypass vmauth and hit them directly), and replace the
+> plaintext passwords with **bcrypt hashes** or an `existingSecret`.
 
 ## 4. Real metrics (vmagent)
 `deploy.sh` installs **vmagent** (`values-vmagent.yaml`), which scrapes the VM cluster
@@ -151,10 +236,17 @@ k3d cluster delete vmtest
 Deploy the **base files only** (drop the `-ocp-sim` overlays — the SCC assigns UID/fsGroup):
 ```bash
 helm install vmcluster vm/victoria-metrics-cluster -f values-vmcluster.yaml -n vm-test
-helm install grafana  grafana/grafana            -f values-grafana.yaml   -n vm-test
+helm install keycloak  codecentric/keycloakx       -f values-keycloak.yaml  -n vm-test
+helm install grafana   grafana/grafana             -f values-grafana.yaml   -n vm-test
 ```
-Then add: Routes for Grafana/vmui, the prod StorageClass + larger PVC/retention, resource
-requests/limits, `replicaCount`, and vmstorage anti-affinity. Re-check `oc get events | grep -i scc`.
+Then adapt for prod:
+- Replace Ingress with **Routes** for Grafana / vmui / Keycloak; update the OIDC `auth_url`
+  (and Grafana `root_url`) to the Route hostnames. The backend `token_url`/`api_url` can stay
+  on the in-cluster Service.
+- Keycloak: `start` (not `start-dev`) with a **real database**, and source the client secret
+  from a Secret rather than the realm JSON literal.
+- prod StorageClass + larger PVC/retention, resource requests/limits, `replicaCount`, vmstorage
+  anti-affinity. Re-check `oc get events | grep -i scc`.
 
 ## OpenShift fixes already baked into the base files
 - **VM cluster**: no override needed — renders empty `securityContext: {}`, so OpenShift's SCC
@@ -163,3 +255,5 @@ requests/limits, `replicaCount`, and vmstorage anti-affinity. Re-check `oc get e
   - pod `securityContext` hardcodes `472` → nulled the UID/GID/fsGroup fields. (Setting `{}`
     does NOT work — Helm merges maps and the 472 survives; the fields must be explicitly null.)
   - `initChownData` is a **root** init container → disabled.
+- **Keycloak**: chart default `runAsUser: 1000` / `fsGroup: 1000` → nulled (same fix as Grafana),
+  so the SCC assigns them. The quay.io Keycloak image is already OpenShift-arbitrary-UID-safe.

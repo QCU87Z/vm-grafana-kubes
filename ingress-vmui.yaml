@@ -1,0 +1,20 @@
+# Ingress for the VictoriaMetrics UI (vmui) via vmselect.
+# Open http://vmui.127.0.0.1.nip.io:8080/select/0/vmui/
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vmui
+  namespace: vm-test
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: vmui.127.0.0.1.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vmcluster-victoria-metrics-cluster-vmselect
+                port:
+                  number: 8481

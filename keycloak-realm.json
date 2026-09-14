@@ -1,0 +1,59 @@
+{
+  "realm": "observability",
+  "enabled": true,
+  "displayName": "Observability SSO",
+  "loginTheme": "keycloak",
+  "roles": {
+    "realm": [
+      { "name": "grafana-admin", "description": "Maps to Grafana server admin" },
+      { "name": "grafana-editor", "description": "Maps to Grafana editor" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "grafana",
+      "name": "Grafana",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "grafana-dev-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://grafana.127.0.0.1.nip.io:8080/login/generic_oauth",
+        "http://grafana.127.0.0.1.nip.io:8080/*"
+      ],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "ashley",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "ashley@example.test",
+      "firstName": "Ashley",
+      "lastName": "Hughes",
+      "credentials": [
+        { "type": "password", "value": "changeme", "temporary": false }
+      ],
+      "realmRoles": ["grafana-admin"]
+    }
+  ]
+}
