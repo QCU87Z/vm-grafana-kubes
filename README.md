@@ -10,6 +10,58 @@ Pinned chart versions (validated with `helm template`):
 - `vm/victoria-metrics-cluster` **0.50.0** (app v1.151.0)
 - `grafana/grafana` **10.5.15** (app 12.3.1)
 
+## Architecture & data flow
+Scrape (pull) paths dotted; data write/read (push/query) paths solid.
+
+```mermaid
+flowchart TB
+    user(["You / browser"])
+
+    subgraph vmtest["namespace: vm-test"]
+        vmagent["vmagent<br/>:8429"]
+        vminsert["vminsert ×2<br/>:8480 http"]
+        vmstorage["vmstorage ×2<br/>:8482 http · :8400 insert · :8401 select"]
+        vmselect["vmselect ×2<br/>:8481 http"]
+        grafana["Grafana<br/>:3000"]
+    end
+
+    subgraph kdash["namespace: kubernetes-dashboard"]
+        kong["kong-proxy<br/>:443"]
+        k8sdash["dashboard api / web / metrics-scraper"]
+    end
+
+    api["kube-apiserver"]
+
+    %% scrape (pull) — vmagent GETs /metrics from each component
+    vmagent -.->|"GET /metrics"| vminsert
+    vmagent -.->|"GET /metrics"| vmselect
+    vmagent -.->|"GET /metrics"| vmstorage
+
+    %% write path
+    vmagent ==>|"remote_write<br/>/insert/0/prometheus :8480"| vminsert
+    vminsert ==>|"store, sharded :8400"| vmstorage
+
+    %% read path
+    vmselect ==>|"fetch series :8401"| vmstorage
+    grafana ==>|"PromQL<br/>/select/0/prometheus :8481"| vmselect
+
+    %% user access (kubectl port-forward)
+    user -->|"pf 3000→80"| grafana
+    user -->|"pf 8481 (vmui)"| vmselect
+    user -->|"pf 8443→443"| kong
+    kong --> k8sdash
+    k8sdash -->|"list/watch pods, deploys, sts, pvcs…"| api
+
+    linkStyle 0,1,2 stroke:#e08a00,stroke-dasharray:4 3
+    linkStyle 3,4,5 stroke:#1a7f37,stroke-width:2px
+```
+
+- **Scrape (dotted)** — vmagent pulls `/metrics` from vminsert (8480), vmselect (8481), vmstorage (8482) and itself (8429); origin of the dashboard's data.
+- **Write (green)** — vmagent `remote_write`s to vminsert:8480, which shards to vmstorage over the internal insert port 8400.
+- **Read (green)** — Grafana PromQL → vmselect:8481, which fans out to every vmstorage over the select port 8401, merges, returns.
+- **vmstorage splits insert (8400) and select (8401)** ports — why vminsert/vmselect scale independently.
+- **Kubernetes Dashboard** talks to the kube-apiserver (live objects), not to VictoriaMetrics. On OpenShift this is replaced by the built-in web console.
+
 ## What k3d CAN and CANNOT prove
 CAN (functional + OpenShift-shaped):
 - Chart topology, values, Grafana→vmselect datasource, PVC storage, real query path.
